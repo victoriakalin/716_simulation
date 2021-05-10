@@ -1,0 +1,173 @@
+---
+title: "716 Project"
+author: "Victoria Kalinovich"
+date: "3/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(eigeninv)
+library(ggplot2)
+library(RColorBrewer)
+library(mvtnorm)
+library(corpcor)
+library(nloptr)
+library(pracma)
+library(Matrix)
+library(latex2exp)
+
+
+set.seed(716)
+
+color_list <- c("#A6CEE3","#1F78B4", "#B2DF8A", "#33A02C")
+theme_716 <- function(){ 
+    font <- "Georgia"   #assign font family up front
+    
+    theme_minimal() %+replace%    #replace elements we want to change
+    
+    theme(
+      
+      #grid elements
+      panel.grid.major = element_line(colour = color_list[1], size = .5, linetype = "dashed"),    #strip major gridlines
+      panel.grid.minor = element_line(colour = color_list[1], size = .5, linetype = "dashed"),    #strip minor gridlines
+      axis.ticks = element_line(colour = color_list[2]),          #strip axis ticks
+      
+      #since theme_minimal() already strips axis lines, 
+      #we don't need to do that again
+      
+      #text elements
+      plot.title = element_text(            #title
+                   colour = color_list[2],                     # color
+                   family = font,            #set font family
+                   size = 18,                #set font size
+                   face = 'bold',            #bold typeface
+                   hjust = 0,                #left align
+                   vjust = 0),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+                   family = font,            #font family
+                   size = 14,
+                   colour = color_list[2]),               #font size
+      
+      plot.caption = element_text(           #caption
+                   family = font,            #font family
+                   size = 9,                 #font size
+                   hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+                   family = font,            #font family
+                   size = 10,
+                   face = 'bold',
+                   colour = color_list[2]),               #font size
+      
+      axis.text = element_text(              #axis text
+                   family = font,            #axis famuly
+                   size = 9,
+                   face = 'bold',
+                   colour = color_list[2]),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+                    margin=margin(5, b = 10))
+      
+      #since the legend often requires manual tweaking 
+      #based on plot content, don't define it here
+    )
+}
+
+```
+
+```{r}
+p = 3000 # number of non zero eigenvalues
+eps = 0.001 # small positive noise 
+N = 10
+```
+
+
+## Find Eigenvalues and Sample
+
+```{r}
+k = 10000
+eigvals = exp(-1*seq(k)) + eps # non-zero eigenvalues
+eigvals = c(eigvals, rep(0, p - k))
+length(eigvals)
+df = data.frame(eig=eigvals, ind=seq(p))
+df
+ggplot(mapping = aes(x = ind, y = eig), data = df) + geom_line() + labs(x = "Index of Eigenvalues", y = "Eigenvalue", title =  "Decay of Eigenvalues") + theme_716()
+# get correlation matrix
+SIGMA = eiginv(eigvals, symmetric = TRUE)
+```
+
+## Sample Values
+
+```{r}
+X = rmvnorm(N, mean = rep(0, p), sigma = SIGMA)
+theta_star = as.vector(rnorm(p, mean = 1, sd = 2))
+epsilon = as.vector(rnorm(N, mean= 0, sd = .05))
+y = X %*%theta_star + epsilon
+
+X_train = X[seq(N*.75),]
+y_train= y[seq(N*.75), ]
+X_test = X[-seq(N*.75),]
+y_test= y[-seq(N*.75), ]
+
+```
+
+
+## Fit Regression
+
+```{r}
+theta_hat <- t(X_train) %*% inv(X_train %*% t(X_train))%*%y_train
+mean((y_train - X_train%*%theta_hat)**2)
+```
+##  Run
+
+
+```{r}
+eps = 0.001 # small positive noise 
+N = 10
+rows = length(seq(2,2000,10))
+out_df = data.frame('model' = seq(2,2000,10), 'train_loss' = rep(0,rows), 'risk' = rep(0,rows))
+#eig = matrix(rep(0,p*rows), nrow = rows, ncol = p)
+for (p in seq(2,2000,10)){
+  cat(p%/%10)
+  cat("\n")
+  set.seed(100)
+  k <- round(.5 * p)
+  eigvals = k-seq(k)**.5 + eps#exp(-1*seq(k)) + eps # non-zero eigenvalues
+  eigvals = c(eigvals, rep(0, p - k))
+  #eig[k/50,] = eigvals
+    # get correlation matrix
+  SIGMA = eiginv(eigvals, symmetric = TRUE) 
+  
+   
+  X = rmvnorm(N, mean = rep(0, p), sigma = SIGMA)
+  theta_star <- as.vector(rnorm(p, mean = 1, sd = 2))
+  epsilon = as.vector(rnorm(N, mean= 0, sd = .05))
+  y = X %*%theta_star + epsilon
+  
+  X_train = X[seq(N*.75),]
+  y_train= y[seq(N*.75), ]
+  X_test = X[-seq(N*.75),]
+  y_test= y[-seq(N*.75), ]
+  theta_hat <- t(X_train) %*% pseudoinverse(X_train %*% t(X_train))%*%y_train
+  train_l = mean((y_train - X_train%*%theta_hat)**2)
+  
+  test_l = mean((y_test - X_test%*%theta_hat)**2)
+  
+  risk = test_l - mean((y_test - X_test%*%theta_star)**2)
+
+  
+  
+  out_df$risk[p/10] = risk
+
+  
+  
+  #out_df$test_loss[p] = test_l
+  out_df$train_loss[p/10] = train_l
+
+
+}
+
+ggplot(mapping = aes(x = model, y = risk), data = out_df) + geom_line() + geom_smooth() + labs(x = "Number of Parameters", y = "Test Risk", title =  "Risk vs Number of Parameters", subtitle = TeX("Decay Rate $-x^{.5}$")) + theme_716()
+
+```
